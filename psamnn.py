@@ -2,12 +2,16 @@
 # Bart Massey 2023
 # Taken mostly from https://pytorch.org/tutorials/beginner/basics
 
-csvfile="personal.csv"
-learning_rate = 5e-3
-epochs = 20
-batch_size = 16
+import argparse, csv, sys
 
-import csv, sys
+ap = argparse.ArgumentParser()
+ap.add_argument("-l", "--learning-rate", type=float, default=0.005)
+ap.add_argument("-e", "--epochs", type=int, default=20)
+ap.add_argument("-b", "--batch_size", type=int, default=16)
+ap.add_argument("-s", "--skip", type=int, default=1)
+ap.add_argument("-r", "--report-interval", type=int, default=0)
+ap.add_argument("csvfile")
+args = ap.parse_args()
 
 import numpy as np
 
@@ -24,7 +28,7 @@ device = (
 )
 print(f"Using {device} device", file=sys.stderr)
 
-def read_csv(instances_file, skip=1, shuffle=True):
+def read_csv(instances_file, skip=args.skip, shuffle=True):
     reader = csv.reader(open(instances_file, "r"))
     instances = np.array([[float(x) for x in row[skip:]] for row in reader], dtype=np.float32)
     if shuffle:
@@ -52,7 +56,7 @@ class CustomCSVDataset(data.Dataset):
             label = self.target_transform(label)
         return features, label
 
-csvdata = read_csv(csvfile)
+csvdata = read_csv(args.csvfile)
 
 test_fraction = 0.2
 ncsvdata = len(csvdata)
@@ -60,8 +64,8 @@ ntrain = int(ncsvdata * test_fraction)
 train_data = CustomCSVDataset(csvdata[:ntrain])
 test_data = CustomCSVDataset(csvdata[ntrain:])
 
-train_dataloader = data.DataLoader(train_data, batch_size=batch_size)
-test_dataloader = data.DataLoader(test_data, batch_size=batch_size)
+train_dataloader = data.DataLoader(train_data, batch_size=args.batch_size)
+test_dataloader = data.DataLoader(test_data, batch_size=1)
 
 class NeuralNetwork(nn.Module):
     def __init__(self, train_data):
@@ -84,9 +88,9 @@ model = NeuralNetwork(train_data).to(device)
 print(model, file=sys.stderr)
 
 loss_fn = nn.MSELoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
 
-def train_loop(dataloader, model, loss_fn, optimizer):
+def train_loop(dataloader, model, loss_fn, optimizer, report=args.report_interval):
     size = len(dataloader.dataset)
     # Set the model to training mode - important for batch normalization and dropout layers
     # Unnecessary in this situation but added for best practices
@@ -101,7 +105,7 @@ def train_loop(dataloader, model, loss_fn, optimizer):
         optimizer.step()
         optimizer.zero_grad()
 
-        if batch % 10 == 0:
+        if report > 0 and batch % report == 0:
             loss, current = loss.item(), (batch + 1) * len(x)
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]", file=sys.stderr)
 
@@ -127,7 +131,7 @@ def test_loop(dataloader, model, loss_fn):
 
 
 print("Training:", file=sys.stderr)
-for t in range(epochs):
+for t in range(args.epochs):
     print(f"Epoch {t+1}\n-------------------------------", file=sys.stderr)
     train_loop(train_dataloader, model, loss_fn, optimizer)
     test_loop(test_dataloader, model, loss_fn)
