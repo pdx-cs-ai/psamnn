@@ -12,7 +12,8 @@ ap.add_argument("-s", "--skip", type=int, default=1)
 ap.add_argument("-r", "--report-interval", type=int, default=0)
 ap.add_argument("-q", "--quiet", action="store_true")
 ap.add_argument("-d", "--acc-delta", type=float, default=0.0001)
-ap.add_argument("--place")
+ap.add_argument("-t", "--test-fraction", type=float, default=0.20)
+ap.add_argument("-p", "--place")
 ap.add_argument("csvfile")
 args = ap.parse_args()
 
@@ -22,14 +23,15 @@ import torch
 from torch import nn
 from torch.utils import data
 
-device = "cpu"
-if args.place == "auto":
+if args.place and args.place != "auto":
+    device = args.place
+else:
     if torch.cuda.is_available():
         device = "cuda"
     elif torch.backends.mps.is_available():
         device = "mps"
-elif args.place:
-    device = args.place
+    else:
+        device = "cpu"
 
 def eprint(*argv, **pargv):
     if args.quiet:
@@ -70,9 +72,8 @@ class CustomCSVDataset(data.Dataset):
 
 csvdata = read_csv(args.csvfile)
 
-test_fraction = 0.2
 ncsvdata = len(csvdata)
-ntrain = int(ncsvdata * test_fraction)
+ntrain = int(ncsvdata * (1.0 - args.test_fraction))
 train_data = CustomCSVDataset(csvdata[:ntrain])
 test_data = CustomCSVDataset(csvdata[ntrain:])
 
