@@ -6,10 +6,13 @@ import argparse, csv, sys
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-l", "--learning-rate", type=float, default=0.005)
-ap.add_argument("-e", "--epochs", type=int, default=20)
-ap.add_argument("-b", "--batch_size", type=int, default=16)
+ap.add_argument("-e", "--epochs", type=int)
+ap.add_argument("-b", "--batch_size", type=int, default=1)
 ap.add_argument("-s", "--skip", type=int, default=1)
 ap.add_argument("-r", "--report-interval", type=int, default=0)
+ap.add_argument("-q", "--quiet", action="store_true")
+ap.add_argument("-d", "--acc-delta", type=float, default=0.0001)
+ap.add_argument("--place")
 ap.add_argument("csvfile")
 args = ap.parse_args()
 
@@ -19,14 +22,23 @@ import torch
 from torch import nn
 from torch.utils import data
 
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
-print(f"Using {device} device", file=sys.stderr)
+device = "cpu"
+if args.place == "auto":
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+elif args.place:
+    device = args.place
+
+def eprint(*argv, **pargv):
+    if args.quiet:
+        return
+    pargv["file"]=sys.stderr
+    print(*argv, **pargv)
+    
+
+eprint(f"Using {device} device")
 
 def read_csv(instances_file, skip=args.skip, shuffle=True):
     reader = csv.reader(open(instances_file, "r"))
@@ -64,7 +76,7 @@ ntrain = int(ncsvdata * test_fraction)
 train_data = CustomCSVDataset(csvdata[:ntrain])
 test_data = CustomCSVDataset(csvdata[ntrain:])
 
-train_dataloader = data.DataLoader(train_data, batch_size=args.batch_size)
+train_dataloader = data.DataLoader(train_data, shuffle=True, batch_size=args.batch_size)
 test_dataloader = data.DataLoader(test_data, batch_size=1)
 
 class NeuralNetwork(nn.Module):
@@ -85,7 +97,7 @@ class NeuralNetwork(nn.Module):
         return logits
 
 model = NeuralNetwork(train_data).to(device)
-print(model, file=sys.stderr)
+eprint(model)
 
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
@@ -107,7 +119,7 @@ def train_loop(dataloader, model, loss_fn, optimizer, report=args.report_interva
 
         if report > 0 and batch % report == 0:
             loss, current = loss.item(), (batch + 1) * len(x)
-            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]", file=sys.stderr)
+            eprint(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
 
 def test_loop(dataloader, model, loss_fn):
     # Set the model to evaluation mode - important for batch normalization and dropout layers
@@ -127,12 +139,23 @@ def test_loop(dataloader, model, loss_fn):
 
     test_loss /= num_batches
     correct /= size
-    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n", file=sys.stderr)
+    eprint(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    return correct
 
 
-print("Training:", file=sys.stderr)
-for t in range(args.epochs):
-    print(f"Epoch {t+1}\n-------------------------------", file=sys.stderr)
+eprint("Training:")
+t = 0
+old_acc = None
+acc_delta = args.acc_delta
+while True:
+    eprint(f"Epoch {t+1}")
+    eprint("-------------------------------")
     train_loop(train_dataloader, model, loss_fn, optimizer)
-    test_loop(test_dataloader, model, loss_fn)
-print("Done!", file=sys.stderr)
+    acc = test_loop(test_dataloader, model, loss_fn)
+    if args.epochs and t >= args.epochs:
+        break
+    if old_acc and acc < old_acc + acc_delta:
+        break
+    old_acc = acc
+    t += 1
+eprint("Done!")
